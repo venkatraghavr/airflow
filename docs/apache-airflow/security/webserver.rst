@@ -319,3 +319,72 @@ RATELIMIT_STORAGE_URI = 'redis://redis_host:6379/0
 
 You can also configure other rate limit settings in ``webserver_config.py`` - for more details, see the
 `Flask Limiter rate limit configuration <https://flask-limiter.readthedocs.io/en/stable/configuration.html>`_.
+
+Airflow-Azure AD Integration
+============================
+complete working code for Airflow-Azure AD integration for delegated authentication may be found below. Besides below configuration in webserver config file, required settings in Azure AD App registration needs to be in place:
+
+import os
+from airflow.configuration import conf
+from airflow.utils.log.logging_mixin import LoggingMixin
+from flask_appbuilder.security.manager import AUTH_OAUTH
+from airflow.www.security import AirflowSecurityManager
+
+SQLALCHEMY_DATABASE_URI = conf.get("database", "SQL_ALCHEMY_CONN")
+basedir = os.path.abspath(os.path.dirname(__file__))
+CSRF_ENABLED = True
+AUTH_TYPE = AUTH_OAUTH
+
+OAUTH_PROVIDERS = [
+  { 
+        'name':'azure', 
+        'token_key':'access_token', 
+        'icon':'fa-windows',
+        'remote_app': {   
+            "api_base_url": "https://login.microsoftonline.com/{tenant_id}",
+            "request_token_url": None,
+            "request_token_params": {
+               "scope": "openid email profile"
+            },
+            "access_token_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+            "access_token_params": {
+               "scope": "openid email profile"
+            },
+            "authorize_url": "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize",
+            "authorize_params": {
+               "scope": "openid email profile"
+            },                
+
+            'client_id':'{client_id}',
+            'client_secret':'{client_secret}',
+            'jwks_uri': 'https://login.microsoftonline.com/common/discovery/v2.0/keys'
+        }
+  }
+]
+AUTH_ROLE_ADMIN = 'Admin'
+AUTH_USER_REGISTRATION_ROLE = "Public"
+AUTH_USER_REGISTRATION = True
+AUTH_ROLES_SYNC_AT_LOGIN = True
+AUTH_ROLES_MAPPING = {
+  "airflow_nonprod_admin": ["Admin"],
+  "airflow_nonprod_dev": ["Op"],
+  "airflow_nonprod_viewer": ["Viewer"]
+}
+
+class AzureCustomSecurity(AirflowSecurityManager, LoggingMixin):
+  def _get_oauth_user_info(self, provider, resp):
+    if provider == "azure":
+        me = self._azure_jwt_token_parse(resp["id_token"])
+        return {
+         "id": me["oid"],
+         "username": me["upn"],
+         "name": me["name"],
+         "email": me["upn"],
+         "first_name": me["given_name"],
+         "last_name": me["family_name"],
+         "role_keys": me["roles"],
+        }
+     return {}
+  oauth_user_info = _get_oauth_user_info
+
+SECURITY_MANAGER_CLASS = AzureCustomSecurity
